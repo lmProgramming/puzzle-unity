@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using ImageGeneration;
 using LM;
 using TMPro;
 using UnityEngine;
@@ -17,13 +18,6 @@ public class PuzzleManager : MonoBehaviour
 
     public GameObject puzzlePieceOutlinePrefab;
 
-    [Header("Image Generation")]
-    public Color color1 = Color.red;
-
-    public Color color2 = Color.blue;
-    public Color color3 = Color.green;
-    public Color color4 = Color.yellow;
-
     [Header("Layout")]
     public Transform boardOrigin;
 
@@ -40,6 +34,9 @@ public class PuzzleManager : MonoBehaviour
     public AudioClip incorrectPlacementSound;
     [SerializeField] private float scrambleDistance;
     [SerializeField] private float scramblePositionDistortion = 0.2f;
+
+    [Header("Image Generation")]
+    [SerializeField] public ImageProvider imageProvider;
 
     private readonly HashSet<int> _correctlyPlacedPieceIDs = new();
     private readonly List<PuzzlePiece> _pieces = new();
@@ -140,15 +137,11 @@ public class PuzzleManager : MonoBehaviour
         var textureHeight = rows * TextureResolutionPerPiece;
         _sourceTexture = new Texture2D(textureWidth, textureHeight);
 
+        var pixels = imageProvider.GetImage(textureWidth, textureHeight);
+
         for (var y = 0; y < textureHeight; y++)
         for (var x = 0; x < textureWidth; x++)
-        {
-            var u = (float)x / textureWidth;
-            var v = (float)y / textureHeight;
-            var c1 = Color.Lerp(color1, color2, u);
-            var c2 = Color.Lerp(color3, color4, u);
-            _sourceTexture.SetPixel(x, y, Color.Lerp(c1, c2, v));
-        }
+            _sourceTexture.SetPixel(x, y, pixels[x, y]);
 
         _sourceTexture.Apply();
     }
@@ -325,29 +318,29 @@ public class PuzzleManager : MonoBehaviour
                     // Color the knob: Sample from the edge of the content
                     var knobColor = Color.black; // Fallback
                     int sampleX = 0, sampleY = 0;
-                    if (edgeDir == 0)
+                    switch (edgeDir)
                     {
-                        sampleX = contentW / 2;
-                        sampleY = contentH - 1;
-                    } // Top edge of content
-                    else if (edgeDir == 1)
-                    {
-                        sampleX = contentW - 1;
-                        sampleY = contentH / 2;
-                    } // Right edge
-                    else if (edgeDir == 2)
-                    {
-                        sampleX = contentW / 2;
-                        sampleY = 0;
-                    } // Bottom edge
-                    else if (edgeDir == 3)
-                    {
-                        sampleX = 0;
-                        sampleY = contentH / 2;
-                    } // Left edge
+                        case 0:
+                            sampleX = contentW / 2;
+                            sampleY = contentH - 1; // Top edge of content
+                            break;
+                        case 1:
+                            sampleX = contentW - 1;
+                            sampleY = contentH / 2; // Right edge
+                            break;
+                        case 2:
+                            sampleX = contentW / 2;
+                            sampleY = 0; // Bottom edge
+                            break;
+                        case 3:
+                            sampleX = 0;
+                            sampleY = contentH / 2; // Left edge
+                            break;
+                    }
 
                     if (sampleX >= 0 && sampleX < contentW && sampleY >= 0 && sampleY < contentH)
                         knobColor = contentPixels[sampleY * contentW + sampleX];
+                    Debug.Log(knobColor);
                     pixels[pixelIndex] = knobColor;
                 }
                 else // Indent
