@@ -1,4 +1,4 @@
-using System.Collections;
+using Cysharp.Threading.Tasks;
 using LM;
 using UnityEngine;
 
@@ -64,13 +64,13 @@ public class PuzzlePiece : MonoBehaviour
             else
             {
                 _puzzleManager.PiecePlacedIncorrectly();
-                StartCoroutine(ReturnToScramblePosition());
+                ReturnToScramblePosition().Forget();
             }
         }
         else
         {
             _puzzleManager.PiecePlacedIncorrectly();
-            StartCoroutine(ReturnToScramblePosition());
+            ReturnToScramblePosition().Forget();
         }
     }
 
@@ -85,7 +85,7 @@ public class PuzzlePiece : MonoBehaviour
         _spriteRenderer.sprite = pieceSprite;
     }
 
-    private IEnumerator ReturnToScramblePosition()
+    private async UniTask ReturnToScramblePosition()
     {
         var startPosition = transform.position;
         var journey = 0f;
@@ -94,7 +94,7 @@ public class PuzzlePiece : MonoBehaviour
         if (duration <= 0.001f)
         {
             transform.position = scramblePosition;
-            yield break;
+            return;
         }
 
         while (journey < duration)
@@ -102,7 +102,7 @@ public class PuzzlePiece : MonoBehaviour
             journey += Time.deltaTime;
             var percent = Mathf.Clamp01(journey / duration);
             transform.position = Vector3.Lerp(startPosition, scramblePosition, percent);
-            yield return null;
+            await UniTask.Yield();
         }
 
         transform.position = scramblePosition;
