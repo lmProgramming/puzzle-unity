@@ -668,7 +668,7 @@ Transform:
   m_GameObject: {fileID: 750574552}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -3.92, y: 0, z: 0}
+  m_LocalPosition: {x: -5.96, y: 2.39, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -987,6 +987,7 @@ MonoBehaviour:
   cols: 4
   pieceSize: 1.5
   puzzlePiecePrefab: {fileID: 3466961434444999964, guid: e773dda969ee43f4399a66b27020187c, type: 3}
+  puzzlePieceOutlinePrefab: {fileID: 8027080283675637545, guid: 4b76a1da442295f4f84aeb476850005a, type: 3}
   puzzlePieceBaseShape: {fileID: -8083370342102504208, guid: cab0bd9cdaf4e204c8b502a5573b0355, type: 3}
   color1: {r: 1, g: 0, b: 0, a: 1}
   color2: {r: 0, g: 0, b: 1, a: 1}
