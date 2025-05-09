@@ -1,16 +1,18 @@
 using System.Collections;
+using LM;
 using UnityEngine;
 
 [RequireComponent(typeof(SpriteRenderer))]
+[RequireComponent(typeof(BoxCollider2D))]
 public class PuzzlePiece : MonoBehaviour
 {
     private const float SnapThreshold = 0.7f;
     private const float ReturnAnimSpeed = 10f;
+
     public int pieceID;
     public Vector3 targetPosition;
+
     public Vector3 scramblePosition;
-    public SpriteRenderer imageDisplayRenderer;
-    private Camera _camera;
 
     private bool _isDragging;
     private bool _isPlaced;
@@ -21,27 +23,26 @@ public class PuzzlePiece : MonoBehaviour
     private void Awake()
     {
         _spriteRenderer = GetComponent<SpriteRenderer>();
-        _camera = Camera.main;
     }
 
     private void OnMouseDown()
     {
-        if (_isPlaced || !_puzzleManager.IsGameActive()) return;
+        if (_isPlaced || !_puzzleManager || !_puzzleManager.IsGameActive()) return;
 
         _isDragging = true;
-        _offset = transform.position - GetMouseWorldPosition();
+        _offset = transform.position - (Vector3)GameInput.WorldPointerPosition;
         _spriteRenderer.sortingOrder = 10;
-        _puzzleManager.PickupPiece();
     }
 
     private void OnMouseDrag()
     {
-        if (_isDragging && _puzzleManager.IsGameActive()) transform.position = GetMouseWorldPosition() + _offset;
+        if (_isDragging && _puzzleManager && _puzzleManager.IsGameActive())
+            transform.position = (Vector3)GameInput.WorldPointerPosition + _offset;
     }
 
     private void OnMouseUp()
     {
-        if (!_isDragging || !_puzzleManager.IsGameActive()) return;
+        if (!_isDragging || !_puzzleManager || !_puzzleManager.IsGameActive()) return;
 
         _isDragging = false;
         _spriteRenderer.sortingOrder = 1;
@@ -82,23 +83,19 @@ public class PuzzlePiece : MonoBehaviour
         _puzzleManager = manager;
 
         _spriteRenderer.sprite = pieceSprite;
-
-        imageDisplayRenderer.sprite = pieceSprite;
-    }
-
-    private Vector3 GetMouseWorldPosition()
-    {
-        var mousePoint = Input.mousePosition;
-        mousePoint.z = _camera.nearClipPlane + 10;
-        return _camera.ScreenToWorldPoint(mousePoint);
     }
 
     private IEnumerator ReturnToScramblePosition()
     {
         var startPosition = transform.position;
         var journey = 0f;
+
         var duration = Vector3.Distance(startPosition, scramblePosition) / ReturnAnimSpeed;
-        if (duration == 0) duration = 0.1f;
+        if (duration <= 0.001f)
+        {
+            transform.position = scramblePosition;
+            yield break;
+        }
 
         while (journey < duration)
         {
@@ -122,6 +119,6 @@ public class PuzzlePiece : MonoBehaviour
         _isDragging = false;
         scramblePosition = newScramblePos;
         transform.position = scramblePosition;
-        _spriteRenderer.sortingOrder = 1;
+        if (_spriteRenderer) _spriteRenderer.sortingOrder = 1;
     }
 }

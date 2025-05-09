@@ -14,8 +14,8 @@ public class PuzzleManager : MonoBehaviour
     public int cols = 4;
     public float pieceSize = 1.5f;
     public GameObject puzzlePiecePrefab;
+
     public GameObject puzzlePieceOutlinePrefab;
-    public Sprite puzzlePieceBaseShape;
 
     [Header("Image Generation")]
     public Color color1 = Color.red;
@@ -38,17 +38,19 @@ public class PuzzleManager : MonoBehaviour
     public AudioClip correctPlacementSound;
 
     public AudioClip incorrectPlacementSound;
-    private readonly HashSet<int> _correctlyPlacedPieceIDs = new();
+    [SerializeField] private float scrambleDistance;
+    [SerializeField] private float scramblePositionDistortion = 0.2f;
 
+    private readonly HashSet<int> _correctlyPlacedPieceIDs = new();
     private readonly List<PuzzlePiece> _pieces = new();
     private readonly Dictionary<int, Vector3> _targetSlots = new();
     private AudioSource _audioSource;
     private bool _gameActive;
     private bool _gameWon;
+    private JointShape[,] _horizontalJoints;
     private Texture2D _sourceTexture;
-
-
     private float _startTime;
+    private JointShape[,] _verticalJoints;
 
     private void Start()
     {
@@ -68,10 +70,46 @@ public class PuzzleManager : MonoBehaviour
         timerText.text = "Time: " + minutes + ":" + seconds;
     }
 
+    private void InitializeJoints()
+    {
+        _horizontalJoints = new JointShape[rows, cols - 1];
+        _verticalJoints = new JointShape[rows - 1, cols];
+
+        for (var r = 0; r < rows; r++)
+        for (var c = 0; c < cols - 1; c++)
+            _horizontalJoints[r, c] = Random.value > 0.5f ? JointShape.Knob : JointShape.Indent;
+
+        for (var r = 0; r < rows - 1; r++)
+        for (var c = 0; c < cols; c++)
+            _verticalJoints[r, c] = Random.value > 0.5f ? JointShape.Knob : JointShape.Indent;
+    }
+
+    private PieceEdgeType GetPieceEdgeTypeInternal(int r, int c, int edgeDirection)
+    {
+        switch (edgeDirection)
+        {
+            case 0: // Top edge
+                if (r == 0) return PieceEdgeType.Flat;
+                return _verticalJoints[r - 1, c] == JointShape.Knob ? PieceEdgeType.Indent : PieceEdgeType.Knob;
+            case 1: // Right edge
+                if (c == cols - 1) return PieceEdgeType.Flat;
+                return _horizontalJoints[r, c] == JointShape.Knob ? PieceEdgeType.Knob : PieceEdgeType.Indent;
+            case 2: // Bottom edge
+                if (r == rows - 1) return PieceEdgeType.Flat;
+                return _verticalJoints[r, c] == JointShape.Knob ? PieceEdgeType.Knob : PieceEdgeType.Indent;
+            case 3: // Left edge
+                if (c == 0) return PieceEdgeType.Flat;
+                return _horizontalJoints[r, c - 1] == JointShape.Knob ? PieceEdgeType.Indent : PieceEdgeType.Knob;
+            default:
+                return PieceEdgeType.Flat;
+        }
+    }
+
+
     private void GenerateAndSetupPuzzle()
     {
         ClearPuzzle();
-
+        InitializeJoints();
         GenerateSourceTexture();
         CreatePuzzlePieces();
         ShuffleAndPlacePieces();
@@ -90,6 +128,10 @@ public class PuzzleManager : MonoBehaviour
             Destroy(piece.gameObject);
         _pieces.Clear();
         _targetSlots.Clear();
+
+        foreach (Transform child in boardOrigin)
+            if (child.name.StartsWith("Outline_"))
+                Destroy(child.gameObject);
     }
 
     private void GenerateSourceTexture()
@@ -103,8 +145,6 @@ public class PuzzleManager : MonoBehaviour
         {
             var u = (float)x / textureWidth;
             var v = (float)y / textureHeight;
-
-            // Simple 4-corner gradient
             var c1 = Color.Lerp(color1, color2, u);
             var c2 = Color.Lerp(color3, color4, u);
             _sourceTexture.SetPixel(x, y, Color.Lerp(c1, c2, v));
@@ -116,80 +156,92 @@ public class PuzzleManager : MonoBehaviour
     private void CreatePuzzlePieces()
     {
         var pieceID = 0;
-        var pieceWidth = _sourceTexture.width / cols;
-        var pieceHeight = _sourceTexture.height / rows;
+        const float knobRadiusRatio = 0.25f;
+        var knobPixelRadius = (int)(Mathf.Min(TextureResolutionPerPiece, TextureResolutionPerPiece) * knobRadiusRatio);
+
+        var pieceTexWidth = TextureResolutionPerPiece + 2 * knobPixelRadius;
+        var pieceTexHeight = TextureResolutionPerPiece + 2 * knobPixelRadius;
+
+        var contentOffsetX = knobPixelRadius;
+        var contentOffsetY = knobPixelRadius;
 
         for (var r = 0; r < rows; r++)
         for (var c = 0; c < cols; c++)
         {
-            // Create Sprite for this piece from the source texture
-            // The rect is defined from bottom-left, so we invert Y
-            var rect = new Rect(c * pieceWidth, (rows - 1 - r) * pieceHeight, pieceWidth, pieceHeight);
-            var pieceImageSprite =
-                Sprite.Create(_sourceTexture, rect, new Vector2(0.5f, 0.5f), 100f);
+            // 1. Get the source image slice pixels
+            var sliceRect = new Rect(c * TextureResolutionPerPiece, (rows - 1 - r) * TextureResolutionPerPiece,
+                TextureResolutionPerPiece,
+                TextureResolutionPerPiece);
+            var sourceSlicePixels = _sourceTexture.GetPixels((int)sliceRect.x, (int)sliceRect.y, (int)sliceRect.width,
+                (int)sliceRect.height);
 
-            var pieceGo = Instantiate(puzzlePiecePrefab, scrambleOrigin.transform);
+            // 2. Create new texture for this piece, initially transparent
+            var pieceTexture = new Texture2D(pieceTexWidth, pieceTexHeight, TextureFormat.RGBA32, false);
+            var piecePixels = new Color32[pieceTexWidth * pieceTexHeight];
+            for (var i = 0; i < piecePixels.Length; i++) piecePixels[i] = Color.clear;
+
+            // 3. Copy source slice into the content area of the piece texture
+            for (var y = 0; y < TextureResolutionPerPiece; y++)
+            for (var x = 0; x < TextureResolutionPerPiece; x++)
+                piecePixels[(contentOffsetY + y) * pieceTexWidth + contentOffsetX + x] =
+                    sourceSlicePixels[y * TextureResolutionPerPiece + x];
+
+            // 4. Determine edge types and draw knobs/indents
+            var topEdge = GetPieceEdgeTypeInternal(r, c, 0);
+            var rightEdge = GetPieceEdgeTypeInternal(r, c, 1);
+            var bottomEdge = GetPieceEdgeTypeInternal(r, c, 2);
+            var leftEdge = GetPieceEdgeTypeInternal(r, c, 3);
+
+            // --- Draw Top Knob/Indent ---
+            if (topEdge != PieceEdgeType.Flat)
+                DrawKnobOrIndent(piecePixels, pieceTexWidth, contentOffsetX + TextureResolutionPerPiece / 2,
+                    contentOffsetY + TextureResolutionPerPiece, knobPixelRadius, topEdge, 0, sourceSlicePixels,
+                    TextureResolutionPerPiece, TextureResolutionPerPiece);
+
+            // --- Draw Right Knob/Indent ---
+            if (rightEdge != PieceEdgeType.Flat)
+                DrawKnobOrIndent(piecePixels, pieceTexWidth, contentOffsetX + TextureResolutionPerPiece,
+                    contentOffsetY + TextureResolutionPerPiece / 2, knobPixelRadius, rightEdge, 1, sourceSlicePixels,
+                    TextureResolutionPerPiece, TextureResolutionPerPiece);
+
+            // --- Draw Bottom Knob/Indent ---
+            if (bottomEdge != PieceEdgeType.Flat)
+                DrawKnobOrIndent(piecePixels, pieceTexWidth, contentOffsetX + TextureResolutionPerPiece / 2,
+                    contentOffsetY,
+                    knobPixelRadius, bottomEdge, 2, sourceSlicePixels, TextureResolutionPerPiece,
+                    TextureResolutionPerPiece);
+
+            // --- Draw Left Knob/Indent ---
+            if (leftEdge != PieceEdgeType.Flat)
+                DrawKnobOrIndent(piecePixels, pieceTexWidth, contentOffsetX,
+                    contentOffsetY + TextureResolutionPerPiece / 2,
+                    knobPixelRadius, leftEdge, 3, sourceSlicePixels, TextureResolutionPerPiece,
+                    TextureResolutionPerPiece);
+
+            pieceTexture.SetPixels32(piecePixels);
+            pieceTexture.filterMode = FilterMode.Point;
+            pieceTexture.Apply();
+
+            // 5. Create Sprite from the generated texture
+            var pixelsPerUnit = TextureResolutionPerPiece / pieceSize;
+            var finalPieceSprite = Sprite.Create(pieceTexture, new Rect(0, 0, pieceTexWidth, pieceTexHeight),
+                new Vector2(0.5f, 0.5f), pixelsPerUnit);
+
+            var pieceGo =
+                Instantiate(puzzlePiecePrefab, scrambleOrigin);
             pieceGo.name = $"Piece_{r}_{c}";
-            pieceGo.transform.localScale =
-                Vector3.one * (pieceSize / (TextureResolutionPerPiece / 100f));
 
-            // Set the "realistic" shape if available
-            var sr = pieceGo.GetComponent<SpriteRenderer>();
-            if (sr && puzzlePieceBaseShape)
-                // Here, we make the main sprite the base shape, and the image becomes a child,
-                // OR we use a shader/material that combines them.
-                // For simplicity, let's make the `pieceImageSprite` itself the one that needs to be shaped.
-                // This means `Sprite.Create` would ideally create a sprite with a custom mesh outline.
-                // Unity's default `Sprite.Create` makes rectangular sprites.
-                // To achieve the "realistic" shape:
-                // 1. Use Pro version of Sprite Editor for custom physics shape / mesh.
-                // 2. Use a masking solution (e.g., SpriteMask or a custom shader).
-                // 3. Create pre-cut sprites (most art-intensive).
-                // For this example, we'll assign the generated `pieceImageSprite` directly.
-                // The `puzzlePiecePrefab` should ideally have the `puzzlePieceBaseShape` as its default sprite.
-                // Then we could either:
-                //    a) Tint this base shape with the average color of `pieceImageSprite`.
-                //    b) Use a shader to map `pieceImageSprite` onto the `puzzlePieceBaseShape`.
-                //    c) The easiest: `pieceImageSprite` is the *actual texture*, and the `PuzzlePieceShape.png` is just for visual reference in the prefab.
-                //       The actual "shape" of interaction will be the BoxCollider2D.
-                //       To make it *look* like a puzzle piece, the `pieceImageSprite` itself should be shaped.
-                //       Since Sprite.Create makes rectangles, we'll rely on the prefab's `SpriteRenderer` having the generic puzzle shape
-                //       and then apply the image slice to it.
-                // Let's assume the prefab's SpriteRenderer already has the puzzle piece shape sprite.
-                // We will now apply the generated texture slice to it.
-                // This is a bit of a hack if the shape sprite isn't just white.
-                // A better way is to have a child sprite for the image.
-                // Simple approach: The prefab has the generic shape. We tint it. This is not ideal.
-                // sr.sprite = puzzlePieceBaseShape; // This is already set in prefab.
-                // sr.color = GetAverageColorFromSprite(pieceImageSprite); // Simple, but loses detail.
-                // Better approach: The prefab has a SpriteRenderer which will display the `pieceImageSprite`.
-                // If `puzzlePieceBaseShape` defines the visual shape, you'd typically use a Sprite Mask.
-                // Let's make `pieceImageSprite` the main visual:
-                sr.sprite = pieceImageSprite;
-            // To make it *appear* as a puzzle shape, even if `pieceImageSprite` is square,
-            // the prefab itself (PuzzlePiece_Prefab) should have the `puzzlePieceBaseShape`
-            // as its sprite. Then, `pieceImageSprite` should be applied to a child, or masked.
-            // For this example, we're saying the `pieceImageSprite` *is* the final visual.
-            // The "realism points" depend on `pieceImageSprite` being actually puzzle-shaped.
-            // Since Texture2D -> Sprite.Create makes rectangles, we'll need to use a SpriteMask.
-            // Let's try using a SpriteMask on the piece prefab if you want to make square slices *look* like puzzle pieces.
-            // 1. PuzzlePiece_Prefab:
-            //    - SpriteRenderer (Sprite: `puzzlePieceBaseShape`, Mask Interaction: Visible Outside Mask)
-            //    - Child GameObject "ImageHolder":
-            //      - SpriteRenderer (Sprite: to be set to `pieceImageSprite`)
-            //    - SpriteMask (Sprite: `puzzlePieceBaseShape`)
-            // This is more setup. For code, we'll just set the sprite.
-            // The visual "puzzle shape" must come from `pieceImageSprite` being pre-shaped or masked.
             var targetPos = boardOrigin.position + new Vector3(c * pieceSize, -r * pieceSize, 0);
 
             var pieceScript = pieceGo.GetComponent<PuzzlePiece>();
-            // Pass the `pieceImageSprite` (the slice of the main image) to the piece
-            pieceScript.Initialize(pieceID, targetPos, Vector3.zero, pieceImageSprite, this);
+            pieceScript.Initialize(pieceID, targetPos, Vector3.zero, finalPieceSprite,
+                this);
 
-            var outline = Instantiate(puzzlePieceOutlinePrefab, boardOrigin.transform);
+            var outline = Instantiate(puzzlePieceOutlinePrefab, boardOrigin);
             outline.transform.position = targetPos;
             outline.name = $"Outline_{r}_{c}";
-            outline.transform.localScale = Vector3.one * (pieceSize / (TextureResolutionPerPiece / 100f));
+
+            outline.transform.localScale = Vector3.one * pieceSize;
 
             _pieces.Add(pieceScript);
             _targetSlots.Add(pieceID, targetPos);
@@ -197,45 +249,150 @@ public class PuzzleManager : MonoBehaviour
         }
     }
 
-    // Helper to get average color (not used in current simple setup, but example)
-    private Color GetAverageColorFromSprite(Sprite sprite)
+    private static void DrawKnobOrIndent(Color32[] pixels, int texWidth, int centerX, int centerY, int radius,
+        PieceEdgeType type, int edgeDir, Color[] contentPixels, int contentW, int contentH)
     {
-        if (!sprite || !sprite.texture) return Color.white;
-        var tex = sprite.texture;
-        var r = sprite.rect;
-        var pixels = tex.GetPixels((int)r.x, (int)r.y, (int)r.width, (int)r.height);
-        var avg = Color.black;
-        foreach (var c in pixels) avg += c;
-        return avg / pixels.Length;
+        for (var y = -radius; y <= radius; y++)
+        for (var x = -radius; x <= radius; x++)
+            if (x * x + y * y <= radius * radius) // Inside the circle
+            {
+                var currentPx = 0;
+                var currentPy = 0;
+
+                if (type == PieceEdgeType.Knob)
+                {
+                    switch (edgeDir)
+                    {
+                        // Knob extends outwards
+                        case 0:
+                            currentPx = centerX + x;
+                            currentPy = centerY + y; // Top
+                            break;
+                        case 1:
+                            currentPx = centerX + x;
+                            currentPy = centerY + y; // Right
+                            break;
+                        case 2:
+                            currentPx = centerX + x;
+                            currentPy = centerY - y; // Bottom (y inverted for outward)
+                            break;
+                        case 3:
+                            currentPx = centerX - x;
+                            currentPy = centerY + y; // Left (x inverted for outward)
+                            break;
+                    }
+
+                    // Ensure it's within bounds and part of the semi-circle extending outwards
+                    var isOutwardHalf = (edgeDir == 0 && y >= 0) || (edgeDir == 1 && x >= 0) ||
+                                        (edgeDir == 2 && y >= 0) || (edgeDir == 3 && x >= 0);
+
+                    if (!isOutwardHalf) continue;
+                }
+                else // Indent is cut into content
+                {
+                    switch (edgeDir)
+                    {
+                        case 0:
+                            currentPx = centerX + x;
+                            currentPy = centerY - y; // Top Indent (y inverted for inward)
+                            break;
+                        case 1:
+                            currentPx = centerX - x;
+                            currentPy = centerY + y; // Right Indent (x inverted for inward)
+                            break;
+                        case 2:
+                            currentPx = centerX + x;
+                            currentPy = centerY + y; // Bottom Indent
+                            break;
+                        case 3:
+                            currentPx = centerX + x;
+                            currentPy = centerY + y; // Left Indent
+                            break;
+                    }
+
+                    var isOutwardHalf = (edgeDir == 0 && y >= 0) || (edgeDir == 1 && x >= 0) ||
+                                        (edgeDir == 2 && y >= 0) || (edgeDir == 3 && x >= 0);
+                    if (!isOutwardHalf) continue;
+                }
+
+
+                if (currentPx < 0 || currentPx >= texWidth || currentPy < 0 ||
+                    currentPy >= pixels.Length / texWidth) continue;
+
+                var pixelIndex = currentPy * texWidth + currentPx;
+                if (type == PieceEdgeType.Knob)
+                {
+                    // Color the knob: Sample from the edge of the content
+                    var knobColor = Color.black; // Fallback
+                    int sampleX = 0, sampleY = 0;
+                    if (edgeDir == 0)
+                    {
+                        sampleX = contentW / 2;
+                        sampleY = contentH - 1;
+                    } // Top edge of content
+                    else if (edgeDir == 1)
+                    {
+                        sampleX = contentW - 1;
+                        sampleY = contentH / 2;
+                    } // Right edge
+                    else if (edgeDir == 2)
+                    {
+                        sampleX = contentW / 2;
+                        sampleY = 0;
+                    } // Bottom edge
+                    else if (edgeDir == 3)
+                    {
+                        sampleX = 0;
+                        sampleY = contentH / 2;
+                    } // Left edge
+
+                    if (sampleX >= 0 && sampleX < contentW && sampleY >= 0 && sampleY < contentH)
+                        knobColor = contentPixels[sampleY * contentW + sampleX];
+                    pixels[pixelIndex] = knobColor;
+                }
+                else // Indent
+                {
+                    pixels[pixelIndex] = Color.clear; // Make content transparent
+                }
+            }
     }
 
 
     private void ShuffleAndPlacePieces()
     {
+        const float knobPixelRadius = .25f;
+
         var availableScramblePositions = new List<Vector3>();
-        var scrambleAreaWidth = cols * pieceSize * 0.8f; // Make scramble area a bit compact
-        var scrambleAreaHeight = rows * pieceSize * 0.8f;
+        var numScrambleCols = Mathf.CeilToInt(Mathf.Sqrt(_pieces.Count));
+        var numScrambleRows = Mathf.CeilToInt((float)_pieces.Count / numScrambleCols);
+
+        var avgPieceActualWidth =
+            pieceSize * ((TextureResolutionPerPiece + 2 * knobPixelRadius) / TextureResolutionPerPiece);
+        var avgPieceActualHeight =
+            pieceSize * ((TextureResolutionPerPiece + 2 * knobPixelRadius) / TextureResolutionPerPiece);
+
 
         for (var i = 0; i < _pieces.Count; i++)
         {
-            // Generate somewhat random positions in the scramble area
-            // Ensure they don't overlap too much - simple grid for scramble positions
-            var x = i % cols * pieceSize - scrambleAreaWidth / 2f;
-            var y = -(i / cols) * pieceSize + scrambleAreaHeight / 2f;
+            var r = i / numScrambleCols;
+            var c = i % numScrambleCols;
+            var x = (c - (numScrambleCols - 1) / 2.0f) * avgPieceActualWidth * scrambleDistance;
+            var y = -(r - (numScrambleRows - 1) / 2.0f) * avgPieceActualHeight * scrambleDistance;
             availableScramblePositions.Add(scrambleOrigin.position + new Vector3(x, y, 0));
         }
 
         availableScramblePositions.Shuffle();
 
-        for (var i = 0; i < _pieces.Count; i++) _pieces[i].ResetPiece(availableScramblePositions[i]);
+        for (var i = 0; i < _pieces.Count; i++)
+            if (i < availableScramblePositions.Count)
+                _pieces[i].ResetPiece(availableScramblePositions[i] +
+                                      (Vector3)Random.insideUnitCircle * scramblePositionDistortion);
     }
 
     public void PiecePlacedCorrectly(PuzzlePiece piece)
     {
         if (!_correctlyPlacedPieceIDs.Add(piece.pieceID)) return;
-
         PlaySound(correctPlacementSound);
-
         if (_correctlyPlacedPieceIDs.Count != _pieces.Count) return;
 
         _gameActive = false;
@@ -253,14 +410,8 @@ public class PuzzleManager : MonoBehaviour
     public bool IsSlotTaken(int pieceIdToCheck, Vector3 targetPosition)
     {
         return _pieces.Any(piece =>
-            piece.IsPlaced() && piece.pieceID != pieceIdToCheck && piece.transform.position == targetPosition);
-    }
-
-
-    public void PickupPiece()
-    {
-        // Optional: play a sound when piece is picked up
-        // PlaySound(pickupSound);
+            piece.IsPlaced() && piece.pieceID != pieceIdToCheck &&
+            Vector3.Distance(piece.transform.position, targetPosition) < 0.1f);
     }
 
     private void PlaySound(AudioClip clip)
@@ -271,5 +422,18 @@ public class PuzzleManager : MonoBehaviour
     public bool IsGameActive()
     {
         return _gameActive;
+    }
+
+    private enum JointShape
+    {
+        Knob,
+        Indent
+    }
+
+    private enum PieceEdgeType
+    {
+        Flat,
+        Knob,
+        Indent
     }
 }
