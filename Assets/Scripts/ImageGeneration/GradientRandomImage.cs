@@ -5,7 +5,6 @@ namespace ImageGeneration
     public class GradientRandomImage : ImageProvider
     {
         private Color _color1;
-
         private Color _color2;
         private Color _color3;
         private Color _color4;

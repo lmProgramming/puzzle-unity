@@ -55,6 +55,12 @@ public class PuzzleManager : MonoBehaviour
 
         winText.gameObject.SetActive(false);
         GenerateAndSetupPuzzle();
+
+        timerText.outlineWidth = 0.2f;
+        timerText.outlineColor = Color.black;
+        
+        winText.outlineWidth = 0.2f;
+        winText.outlineColor = Color.black;
     }
 
     private void Update()
