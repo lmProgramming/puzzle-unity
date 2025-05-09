@@ -1,22 +1,21 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
+using LM;
 using TMPro;
 using UnityEngine;
-using Random = System.Random;
-// For shuffling
-
-// For TextMeshPro
 
 public class PuzzleManager : MonoBehaviour
 {
-    private const int TextureResolutionPerPiece = 128; // Resolution for each piece's texture part
+    private const int TextureResolutionPerPiece = 128;
 
     [Header("Puzzle Settings")]
     public int rows = 4;
 
     public int cols = 4;
-    public float pieceSize = 1.5f; // Adjust based on your art and camera
+    public float pieceSize = 1.5f;
     public GameObject puzzlePiecePrefab;
-    public Sprite puzzlePieceBaseShape; // Assign your PuzzlePieceShape.png here in Inspector
+    public GameObject puzzlePieceOutlinePrefab;
+    public Sprite puzzlePieceBaseShape;
 
     [Header("Image Generation")]
     public Color color1 = Color.red;
@@ -26,9 +25,9 @@ public class PuzzleManager : MonoBehaviour
     public Color color4 = Color.yellow;
 
     [Header("Layout")]
-    public Transform boardOrigin; // Assign an empty GameObject for the top-left of the puzzle board
+    public Transform boardOrigin;
 
-    public Transform scrambleOrigin; // Assign an empty GameObject for the scramble area
+    public Transform scrambleOrigin;
 
     [Header("UI")]
     public TextMeshProUGUI timerText;
@@ -42,7 +41,7 @@ public class PuzzleManager : MonoBehaviour
     private readonly HashSet<int> _correctlyPlacedPieceIDs = new();
 
     private readonly List<PuzzlePiece> _pieces = new();
-    private readonly Dictionary<int, Vector3> _targetSlots = new(); // pieceID -> targetPosition
+    private readonly Dictionary<int, Vector3> _targetSlots = new();
     private AudioSource _audioSource;
     private bool _gameActive;
     private bool _gameWon;
@@ -54,23 +53,6 @@ public class PuzzleManager : MonoBehaviour
     private void Start()
     {
         _audioSource = GetComponent<AudioSource>();
-        if (_audioSource == null)
-        {
-            Debug.LogError("PuzzleManager needs an AudioSource component.");
-            enabled = false;
-            return;
-        }
-
-        if (puzzlePiecePrefab == null || boardOrigin == null || scrambleOrigin == null || timerText == null ||
-            winText == null)
-        {
-            Debug.LogError("PuzzleManager is missing some references! Please assign them in the Inspector.");
-            enabled = false;
-            return;
-        }
-
-        if (puzzlePieceBaseShape == null)
-            Debug.LogWarning("Puzzle Piece Base Shape not assigned. Pieces will be square.");
 
         winText.gameObject.SetActive(false);
         GenerateAndSetupPuzzle();
@@ -78,18 +60,17 @@ public class PuzzleManager : MonoBehaviour
 
     private void Update()
     {
-        if (_gameActive && !_gameWon)
-        {
-            var t = Time.time - _startTime;
-            var minutes = ((int)t / 60).ToString("00");
-            var seconds = (t % 60).ToString("00.00");
-            timerText.text = "Time: " + minutes + ":" + seconds;
-        }
+        if (!_gameActive || _gameWon) return;
+
+        var t = Time.time - _startTime;
+        var minutes = ((int)t / 60).ToString("00");
+        var seconds = (t % 60).ToString("00.00");
+        timerText.text = "Time: " + minutes + ":" + seconds;
     }
 
-    public void GenerateAndSetupPuzzle()
+    private void GenerateAndSetupPuzzle()
     {
-        ClearPuzzle(); // Clear existing pieces if any
+        ClearPuzzle();
 
         GenerateSourceTexture();
         CreatePuzzlePieces();
@@ -106,8 +87,7 @@ public class PuzzleManager : MonoBehaviour
     private void ClearPuzzle()
     {
         foreach (var piece in _pieces)
-            if (piece != null)
-                Destroy(piece.gameObject);
+            Destroy(piece.gameObject);
         _pieces.Clear();
         _targetSlots.Clear();
     }
@@ -146,17 +126,17 @@ public class PuzzleManager : MonoBehaviour
             // The rect is defined from bottom-left, so we invert Y
             var rect = new Rect(c * pieceWidth, (rows - 1 - r) * pieceHeight, pieceWidth, pieceHeight);
             var pieceImageSprite =
-                Sprite.Create(_sourceTexture, rect, new Vector2(0.5f, 0.5f), 100f); // 100 pixels per unit
+                Sprite.Create(_sourceTexture, rect, new Vector2(0.5f, 0.5f), 100f);
 
-            var pieceGo = Instantiate(puzzlePiecePrefab);
+            var pieceGo = Instantiate(puzzlePiecePrefab, scrambleOrigin.transform);
             pieceGo.name = $"Piece_{r}_{c}";
             pieceGo.transform.localScale =
-                Vector3.one * (pieceSize / (TextureResolutionPerPiece / 100f)); // Adjust scale
+                Vector3.one * (pieceSize / (TextureResolutionPerPiece / 100f));
 
             // Set the "realistic" shape if available
             var sr = pieceGo.GetComponent<SpriteRenderer>();
-            if (sr && puzzlePieceBaseShape != null)
-                // Here, we make the main sprite the base shape, and the image becomes a child
+            if (sr && puzzlePieceBaseShape)
+                // Here, we make the main sprite the base shape, and the image becomes a child,
                 // OR we use a shader/material that combines them.
                 // For simplicity, let's make the `pieceImageSprite` itself the one that needs to be shaped.
                 // This means `Sprite.Create` would ideally create a sprite with a custom mesh outline.
@@ -186,7 +166,7 @@ public class PuzzleManager : MonoBehaviour
                 // If `puzzlePieceBaseShape` defines the visual shape, you'd typically use a Sprite Mask.
                 // Let's make `pieceImageSprite` the main visual:
                 sr.sprite = pieceImageSprite;
-            // To make it *appear* as a puzzle shape even if `pieceImageSprite` is square,
+            // To make it *appear* as a puzzle shape, even if `pieceImageSprite` is square,
             // the prefab itself (PuzzlePiece_Prefab) should have the `puzzlePieceBaseShape`
             // as its sprite. Then, `pieceImageSprite` should be applied to a child, or masked.
             // For this example, we're saying the `pieceImageSprite` *is* the final visual.
@@ -206,6 +186,11 @@ public class PuzzleManager : MonoBehaviour
             // Pass the `pieceImageSprite` (the slice of the main image) to the piece
             pieceScript.Initialize(pieceID, targetPos, Vector3.zero, pieceImageSprite, this);
 
+            var outline = Instantiate(puzzlePieceOutlinePrefab, boardOrigin.transform);
+            outline.transform.position = targetPos;
+            outline.name = $"Outline_{r}_{c}";
+            outline.transform.localScale = Vector3.one * (pieceSize / (TextureResolutionPerPiece / 100f));
+
             _pieces.Add(pieceScript);
             _targetSlots.Add(pieceID, targetPos);
             pieceID++;
@@ -215,7 +200,7 @@ public class PuzzleManager : MonoBehaviour
     // Helper to get average color (not used in current simple setup, but example)
     private Color GetAverageColorFromSprite(Sprite sprite)
     {
-        if (sprite == null || sprite.texture == null) return Color.white;
+        if (!sprite || !sprite.texture) return Color.white;
         var tex = sprite.texture;
         var r = sprite.rect;
         var pixels = tex.GetPixels((int)r.x, (int)r.y, (int)r.width, (int)r.height);
@@ -240,37 +225,24 @@ public class PuzzleManager : MonoBehaviour
             availableScramblePositions.Add(scrambleOrigin.position + new Vector3(x, y, 0));
         }
 
-        // Fisher-Yates shuffle for positions
-        var rng = new Random();
-        var n = availableScramblePositions.Count;
-        while (n > 1)
-        {
-            n--;
-            var k = rng.Next(n + 1);
-            var value = availableScramblePositions[k];
-            availableScramblePositions[k] = availableScramblePositions[n];
-            availableScramblePositions[n] = value;
-        }
+        availableScramblePositions.Shuffle();
 
-        for (var i = 0; i < _pieces.Count; i++)
-            _pieces[i].ResetPiece(availableScramblePositions[i]); // Reset and assign new scramble pos
+        for (var i = 0; i < _pieces.Count; i++) _pieces[i].ResetPiece(availableScramblePositions[i]);
     }
 
     public void PiecePlacedCorrectly(PuzzlePiece piece)
     {
-        if (_correctlyPlacedPieceIDs.Add(piece.pieceID)) // Returns true if item was added (wasn't there before)
-        {
-            PlaySound(correctPlacementSound);
-            // Check for win condition
-            if (_correctlyPlacedPieceIDs.Count == _pieces.Count)
-            {
-                _gameActive = false;
-                _gameWon = true;
-                winText.text = "YOU WIN!\nTime: " + timerText.text.Substring(6);
-                winText.gameObject.SetActive(true);
-                Debug.Log("Puzzle Solved!");
-            }
-        }
+        if (!_correctlyPlacedPieceIDs.Add(piece.pieceID)) return;
+
+        PlaySound(correctPlacementSound);
+
+        if (_correctlyPlacedPieceIDs.Count != _pieces.Count) return;
+
+        _gameActive = false;
+        _gameWon = true;
+        winText.text = "YOU WIN!\nTime: " + timerText.text[6..];
+        winText.gameObject.SetActive(true);
+        Debug.Log("Puzzle Solved!");
     }
 
     public void PiecePlacedIncorrectly()
@@ -280,12 +252,8 @@ public class PuzzleManager : MonoBehaviour
 
     public bool IsSlotTaken(int pieceIdToCheck, Vector3 targetPosition)
     {
-        // Check if any *other* correctly placed piece is already at this targetPosition
-        foreach (var piece in _pieces)
-            if (piece.IsPlaced() && piece.pieceID != pieceIdToCheck && piece.transform.position == targetPosition)
-                return true; // Slot is taken by another correctly placed piece
-
-        return false; // Slot is free or taken by the piece that is trying to snap (which is fine)
+        return _pieces.Any(piece =>
+            piece.IsPlaced() && piece.pieceID != pieceIdToCheck && piece.transform.position == targetPosition);
     }
 
 
@@ -297,7 +265,7 @@ public class PuzzleManager : MonoBehaviour
 
     private void PlaySound(AudioClip clip)
     {
-        if (_audioSource != null && clip != null) _audioSource.PlayOneShot(clip);
+        if (_audioSource && clip) _audioSource.PlayOneShot(clip);
     }
 
     public bool IsGameActive()
