@@ -4,13 +4,13 @@ using ImageGeneration;
 using LM;
 using TMPro;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class PuzzleManager : MonoBehaviour
 {
     private const int TextureResolutionPerPiece = 128;
 
-    [Header("Puzzle Settings")]
-    public int rows = 4;
+    [Header("Puzzle Settings")] public int rows = 4;
 
     public int cols = 4;
     public float pieceSize = 1.5f;
@@ -18,25 +18,22 @@ public class PuzzleManager : MonoBehaviour
 
     public GameObject puzzlePieceOutlinePrefab;
 
-    [Header("Layout")]
-    public Transform boardOrigin;
+    [Header("Layout")] public Transform boardOrigin;
 
     public Transform scrambleOrigin;
 
-    [Header("UI")]
-    public TextMeshProUGUI timerText;
+    [Header("UI")] public TextMeshProUGUI timerText;
 
     public TextMeshProUGUI winText;
 
-    [Header("Audio")]
-    public AudioClip correctPlacementSound;
+    [Header("Audio")] public AudioClip correctPlacementSound;
 
     public AudioClip incorrectPlacementSound;
     [SerializeField] private float scrambleDistance;
     [SerializeField] private float scramblePositionDistortion = 0.2f;
 
-    [Header("Image Generation")]
-    [SerializeField] public ImageProvider imageProvider;
+    [Header("Image Generation")] [SerializeField]
+    public ImageProvider imageProvider;
 
     private readonly HashSet<int> _correctlyPlacedPieceIDs = new();
     private readonly List<PuzzlePiece> _pieces = new();
@@ -58,7 +55,7 @@ public class PuzzleManager : MonoBehaviour
 
         timerText.outlineWidth = 0.2f;
         timerText.outlineColor = Color.black;
-        
+
         winText.outlineWidth = 0.2f;
         winText.outlineColor = Color.black;
     }
@@ -421,6 +418,11 @@ public class PuzzleManager : MonoBehaviour
     public bool IsGameActive()
     {
         return _gameActive;
+    }
+
+    public void RestartGame()
+    {
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 
     private enum JointShape
