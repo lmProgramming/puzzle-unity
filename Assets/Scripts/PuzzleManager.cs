@@ -248,109 +248,103 @@ public class PuzzleManager : MonoBehaviour
     private static void DrawKnobOrIndent(Color32[] pixels, int texWidth, int centerX, int centerY, int radius,
         PieceEdgeType type, int edgeDir, Color[] contentPixels, int contentW, int contentH)
     {
+        var radiusSquared = radius * radius;
+
         for (var y = -radius; y <= radius; y++)
         for (var x = -radius; x <= radius; x++)
-            if (x * x + y * y <= radius * radius) // Inside the circle
+        {
+            if (x * x + y * y > radiusSquared) continue;
+
+            var currentPx = 0;
+            var currentPy = 0;
+
+            if (type == PieceEdgeType.Knob)
             {
-                var currentPx = 0;
-                var currentPy = 0;
-
-                if (type == PieceEdgeType.Knob)
+                switch (edgeDir)
                 {
-                    switch (edgeDir)
-                    {
-                        // Knob extends outwards
-                        case 0:
-                            currentPx = centerX + x;
-                            currentPy = centerY + y; // Top
-                            break;
-                        case 1:
-                            currentPx = centerX + x;
-                            currentPy = centerY + y; // Right
-                            break;
-                        case 2:
-                            currentPx = centerX + x;
-                            currentPy = centerY - y; // Bottom (y inverted for outward)
-                            break;
-                        case 3:
-                            currentPx = centerX - x;
-                            currentPy = centerY + y; // Left (x inverted for outward)
-                            break;
-                    }
-
-                    // Ensure it's within bounds and part of the semi-circle extending outwards
-                    var isOutwardHalf = (edgeDir == 0 && y >= 0) || (edgeDir == 1 && x >= 0) ||
-                                        (edgeDir == 2 && y >= 0) || (edgeDir == 3 && x >= 0);
-
-                    if (!isOutwardHalf) continue;
-                }
-                else // Indent is cut into content
-                {
-                    switch (edgeDir)
-                    {
-                        case 0:
-                            currentPx = centerX + x;
-                            currentPy = centerY - y; // Top Indent (y inverted for inward)
-                            break;
-                        case 1:
-                            currentPx = centerX - x;
-                            currentPy = centerY + y; // Right Indent (x inverted for inward)
-                            break;
-                        case 2:
-                            currentPx = centerX + x;
-                            currentPy = centerY + y; // Bottom Indent
-                            break;
-                        case 3:
-                            currentPx = centerX + x;
-                            currentPy = centerY + y; // Left Indent
-                            break;
-                    }
-
-                    var isOutwardHalf = (edgeDir == 0 && y >= 0) || (edgeDir == 1 && x >= 0) ||
-                                        (edgeDir == 2 && y >= 0) || (edgeDir == 3 && x >= 0);
-                    if (!isOutwardHalf) continue;
+                    // Knob extends outwards
+                    case 0:
+                    case 1:
+                        currentPx = centerX + x;
+                        currentPy = centerY + y; // Top or Right
+                        break;
+                    case 2:
+                        currentPx = centerX + x;
+                        currentPy = centerY - y; // Bottom (y inverted for outward)
+                        break;
+                    case 3:
+                        currentPx = centerX - x;
+                        currentPy = centerY + y; // Left (x inverted for outward)
+                        break;
                 }
 
-
-                if (currentPx < 0 || currentPx >= texWidth || currentPy < 0 ||
-                    currentPy >= pixels.Length / texWidth) continue;
-
-                var pixelIndex = currentPy * texWidth + currentPx;
-                if (type == PieceEdgeType.Knob)
-                {
-                    // Color the knob: Sample from the edge of the content
-                    var knobColor = Color.black; // Fallback
-                    int sampleX = 0, sampleY = 0;
-                    switch (edgeDir)
-                    {
-                        case 0:
-                            sampleX = contentW / 2;
-                            sampleY = contentH - 1; // Top edge of content
-                            break;
-                        case 1:
-                            sampleX = contentW - 1;
-                            sampleY = contentH / 2; // Right edge
-                            break;
-                        case 2:
-                            sampleX = contentW / 2;
-                            sampleY = 0; // Bottom edge
-                            break;
-                        case 3:
-                            sampleX = 0;
-                            sampleY = contentH / 2; // Left edge
-                            break;
-                    }
-
-                    if (sampleX >= 0 && sampleX < contentW && sampleY >= 0 && sampleY < contentH)
-                        knobColor = contentPixels[sampleY * contentW + sampleX];
-                    Debug.Log(knobColor);
-                    pixels[pixelIndex] = knobColor;
-                }
-                else // Indent
-                {
-                    pixels[pixelIndex] = Color.clear; // Make content transparent
-                }
+                var isOutwardHalf = (edgeDir == 0 && y >= 0) || (edgeDir == 1 && x >= 0) ||
+                                    (edgeDir == 2 && y >= 0) || (edgeDir == 3 && x >= 0);
+                if (!isOutwardHalf) continue;
             }
+            else // Indent is cut into content
+            {
+                switch (edgeDir)
+                {
+                    case 0:
+                        currentPx = centerX + x;
+                        currentPy = centerY - y; // Top Indent (y inverted for inward)
+                        break;
+                    case 1:
+                        currentPx = centerX - x;
+                        currentPy = centerY + y; // Right Indent (x inverted for inward)
+                        break;
+                    case 2:
+                    case 3:
+                        currentPx = centerX + x;
+                        currentPy = centerY + y; // Bottom or Left Indent
+                        break;
+                }
+
+                var isOutwardHalf = (edgeDir == 0 && y >= 0) || (edgeDir == 1 && x >= 0) ||
+                                    (edgeDir == 2 && y >= 0) || (edgeDir == 3 && x >= 0);
+                if (!isOutwardHalf) continue;
+            }
+
+
+            if (currentPx < 0 || currentPx >= texWidth || currentPy < 0 ||
+                currentPy >= pixels.Length / texWidth) continue;
+
+            var pixelIndex = currentPy * texWidth + currentPx;
+            if (type == PieceEdgeType.Knob)
+            {
+                // Color the knob: Sample from the edge of the content
+                var knobColor = Color.black; // Fallback
+                int sampleX = 0, sampleY = 0;
+                switch (edgeDir)
+                {
+                    case 0:
+                        sampleX = contentW / 2;
+                        sampleY = contentH - 1; // Top edge of content
+                        break;
+                    case 1:
+                        sampleX = contentW - 1;
+                        sampleY = contentH / 2; // Right edge
+                        break;
+                    case 2:
+                        sampleX = contentW / 2;
+                        sampleY = 0; // Bottom edge
+                        break;
+                    case 3:
+                        sampleX = 0;
+                        sampleY = contentH / 2; // Left edge
+                        break;
+                }
+
+                if (sampleX >= 0 && sampleX < contentW && sampleY >= 0 && sampleY < contentH)
+                    knobColor = contentPixels[sampleY * contentW + sampleX];
+                pixels[pixelIndex] = knobColor;
+            }
+            else // Indent
+            {
+                pixels[pixelIndex] = Color.clear; // Make content transparent
+            }
+        }
     }
 
 
